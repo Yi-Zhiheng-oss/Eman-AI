@@ -2,6 +2,7 @@ package com.itheima.ai.controller;
 
 import com.itheima.ai.pdf.PdfAsset;
 import com.itheima.ai.pdf.PdfAssetRepository;
+import com.itheima.ai.pdf.PdfRagService;
 import com.itheima.ai.repository.ChatHistoryRepository;
 import lombok.RequiredArgsConstructor;
 import org.apache.pdfbox.pdmodel.PDDocument;
@@ -32,7 +33,7 @@ public class PdfChatController {
     private final ChatClient chatClient;
     private final ChatHistoryRepository chatHistoryRepository;
     private final PdfAssetRepository pdfAssetRepository;
-
+    private final PdfRagService pdfRagService;
     /**
      * 前端：POST /ai/pdf/upload/{chatId}  body=FormData(file)
      * 返回：{ chatId: "...", fileName: "..." }
@@ -67,6 +68,9 @@ public class PdfChatController {
                 Instant.now().toEpochMilli()
         );
         pdfAssetRepository.save(asset);
+
+        // ✅ RAG：切分+embedding+入向量库（建议：放 try-catch，避免向量失败影响上传）
+        pdfRagService.indexPdf(chatId, fileName, pdfText, Instant.now().toEpochMilli());
 
         // 3) 保存会话ID到历史（type=pdf）
         chatHistoryRepository.save("pdf", chatId);
@@ -112,8 +116,15 @@ public class PdfChatController {
         // 保存会话ID到历史（防止用户直接调用chat未走upload）
         chatHistoryRepository.save("pdf", chatId);
 
+
+        // ✅ RAG 检索 top2
+        List<org.springframework.ai.document.Document> docs =
+                pdfRagService.retrieveTopK(chatId, prompt, 2);
+
         // 从全文中抽取“相关片段”给模型（避免塞全文）
-        String context = buildRelevantContext(asset.getPdfText(), prompt);
+//        String context = buildRelevantContext(asset.getPdfText(), prompt);
+
+        String context = buildContextFromDocs(docs);
 
         String system = """
                 你是一个严谨的 PDF 文档问答助手。
@@ -146,6 +157,22 @@ public class PdfChatController {
         }
     }
 
+
+    // 从 docs 中构建prompt和知识库的拼接上下文
+    private String buildContextFromDocs(List<org.springframework.ai.document.Document> docs) {
+        if (docs == null || docs.isEmpty()) return "（未检索到相关片段）";
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < docs.size(); i++) {
+            var d = docs.get(i);
+            var meta = d.getMetadata() == null ? Map.of() : d.getMetadata();
+            sb.append("【片段 ").append(i + 1).append("】")
+                    .append(" chunkIndex=").append(meta.getOrDefault("chunkIndex", "?"))
+                    .append("\n")
+                    .append(d.getText())
+                    .append("\n\n---\n\n");
+        }
+        return sb.toString();
+    }
     /**
      * 极简“检索”：从全文里截取包含关键词的若干窗口片段
      * - 不引入向量库即可工作
