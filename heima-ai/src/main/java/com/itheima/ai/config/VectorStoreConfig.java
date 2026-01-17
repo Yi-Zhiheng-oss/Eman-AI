@@ -11,6 +11,7 @@ import org.springframework.context.annotation.Primary;
 @Configuration
 public class VectorStoreConfig {
 
+    //后期优化可换redisvectorStore
     @Bean
 
     public VectorStore vectorStore(@Qualifier("openAiEmbeddingModel") EmbeddingModel embeddingModel) {

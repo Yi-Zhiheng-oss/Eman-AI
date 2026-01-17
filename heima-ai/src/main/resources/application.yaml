@@ -17,7 +17,7 @@ spring:
         options:
           model: text-embedding-v4
 
-
+  #屏蔽ollama配置
   autoconfigure:
     exclude:
       - org.springframework.ai.autoconfigure.ollama.OllamaAutoConfiguration
